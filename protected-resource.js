@@ -1,6 +1,7 @@
 const express = require("express")
 const bodyParser = require("body-parser")
 const fs = require("fs")
+const jwt = require("jsonwebtoken")
 const { timeout } = require("./utils")
 
 const config = {
@@ -36,8 +37,9 @@ app.get("/user-info", (req, res) => {
 		res.status(401).send("Error: client unauthorized")
 		return
 	}
-	
+
 	const authToken = req.headers.authorization.slice("bearer ".length)
+	
 	let userInfo = null
 	try {
 		userInfo = jwt.verify(authToken, config.publicKey, {
@@ -61,6 +63,7 @@ app.get("/user-info", (req, res) => {
 	}
 
 	res.json(userWithRestrictedFields)
+	res.status(200).send();
 })
 
 const server = app.listen(config.port, "localhost", function () {
