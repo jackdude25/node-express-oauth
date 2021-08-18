@@ -1,3 +1,4 @@
+const url = require("url");
 const fs = require("fs")
 const express = require("express")
 const bodyParser = require("body-parser")
@@ -54,23 +55,94 @@ app.use(bodyParser.urlencoded({ extended: true }))
 Your code here
 */
 app.get("/authorize", (req, res)=>{
-	const client = clients[req.query.client_id];
+	const clientId = req.query.client_id
+	const client = clients[clientId]
+	if (!client) {
+		res.status(401).send("Error: client not authorized")
+		return
+	}
+	if (
+		typeof req.query.scope !== "string" ||
+		!containsAll(client.scopes, req.query.scope.split(" "))
+	) {
+		res.status(401).send("Error: invalid scopes requested")
+		return
+	}
+	const requestId = randomString()
+	requests[requestId] = req.query
+	res.render("login", {
+		client,
+		scope: req.query.scope,
+		requestId,
+	})
 
-	if(!client){
+	app.post("/token", (req, res) => {
+		let authCredentials = req.headers.authorization
+		if (!authCredentials) {
+			res.status(401).send("Error: not authorized")
+			return
+		}
+		const { clientId, clientSecret } = decodeAuthCredentials(authCredentials)
+		const client = clients[clientId]
+		if (!client || client.clientSecret !== clientSecret) {
+			res.status(401).send("Error: client not authorized")
+			return
+		}
+		const code = req.body.code
+		if (!code || !authorizationCodes[code]) {
+			res.status(401).send("Error: invalid code")
+			return
+		}
+		const { clientReq, userName } = authorizationCodes[code]
+		delete authorizationCodes[code]
+		const token = jwt.sign(
+			{
+				userName,
+				scope: clientReq.scope,
+			},
+			config.privateKey,
+			{
+				algorithm: "RS256",
+				expiresIn: 300,
+				issuer: "http://localhost:" + config.port,
+			}
+		)
+		res.json({
+			access_token: token,
+			token_type: "Bearer",
+			scope: clientReq.scope,
+		})
+	})
+	
+})
+
+app.post("/approve", (req, res) =>{
+	un = req.body.userName;
+	pw = req.body.password;
+	if (!un || users[un] !== pw){
 		res.status(401).send();
 		return;
 	}
-	else{
-		scopes = client.scopes;
-		reqscopes = req.query.scope.split(" ");
-		if (!containsAll(scopes, reqscopes)){
-			res.status(401).send();
-		}
-		else{
-			res.status(200).send();
-		}
+	if (!requests[req.body.requestId]){
+		res.status(401).send();
+		return;
 	}
+	localReq = requests[req.body.requestId];
+	delete requests[req.body.requestId];
+
+	code = randomString();
+	authorizationCodes[code] = {
+		clientReq: localReq,
+		userName: un
+	}
+	const redirectUri = url.parse(localReq.redirect_uri)
+	redirectUri.query = {
+		code,
+		state: localReq.state,
+	}
+	res.redirect(url.format(redirectUri))
 })
+
 
 const server = app.listen(config.port, "localhost", function () {
 	var host = server.address().address
